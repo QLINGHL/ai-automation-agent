@@ -1,0 +1,31 @@
+order_id,date,product,category,region,units,unit_price,revenue,customer_rating,customer_feedback
+1001,2026-09-01,Wireless Mouse,Accessories,North,3,25.99,77.97,4.5,"Fast delivery and great build quality, very happy with this purchase"
+1002,2026-09-02,Mechanical Keyboard,Accessories,South,5,79.50,397.50,5.0,Battery life is excellent and the delivery was fast
+1003,2026-09-03,USB-C Hub,Accessories,East,2,45.00,90.00,4.0,"Good value for the price, packaging could be better"
+1004,2026-09-04,Laptop Stand,Accessories,West,8,39.99,319.92,,"Customer support helped me with setup, great service overall"
+1005,2026-09-05,Webcam HD 1080p,Video,North,1,59.99,59.99,3.5,"The quality exceeded my expectations, delivery took two days"
+1006,2026-09-06,Noise-Cancelling Headphones,Audio,South,4,129.99,519.96,4.8,"Works exactly as described, fast shipping and solid packaging"
+1007,2026-09-07,Wireless Mouse,Accessories,East,6,25.99,155.94,5.0,Sound quality is amazing and the battery lasts all week
+1008,2026-09-08,Mechanical Keyboard,Accessories,West,2,79.50,159.00,4.2,"Easy to set up, support team replied within an hour"
+1009,2026-09-09,USB-C Hub,Accessories,North,7,45.00,315.00,4.6,"Great price for this quality, would buy again"
+1010,2026-09-10,Laptop Stand,Accessories,South,3,39.99,119.97,,Delivery was delayed but the product quality is excellent
+1011,2026-09-11,Webcam HD 1080p,Video,East,12,59.99,719.88,4.9,"Fast delivery and great build quality, very happy with this purchase"
+1012,2026-09-12,Noise-Cancelling Headphones,Audio,West,2,129.99,259.98,3.8,Battery life is excellent and the delivery was fast
+1013,2026-09-13,Wireless Mouse,Accessories,North,5,25.99,129.95,4.4,"Good value for the price, packaging could be better"
+1014,2026-09-14,Mechanical Keyboard,Accessories,South,4,79.50,318.00,5.0,"Customer support helped me with setup, great service overall"
+1015,2026-09-15,USB-C Hub,Accessories,East,1,45.00,45.00,4.1,"The quality exceeded my expectations, delivery took two days"
+1016,2026-09-16,Laptop Stand,Accessories,West,9,39.99,359.91,4.7,"Works exactly as described, fast shipping and solid packaging"
+1017,2026-09-17,Webcam HD 1080p,Video,North,3,59.99,179.97,,Sound quality is amazing and the battery lasts all week
+1018,2026-09-18,Noise-Cancelling Headphones,Audio,South,6,129.99,779.94,4.3,"Easy to set up, support team replied within an hour"
+1019,2026-09-19,Wireless Mouse,Accessories,East,2,25.99,51.98,3.9,"Great price for this quality, would buy again"
+1020,2026-09-20,Mechanical Keyboard,Accessories,West,4,79.50,318.00,4.6,Delivery was delayed but the product quality is excellent
+1021,2026-09-21,USB-C Hub,Accessories,North,7,45.00,315.00,5.0,"Fast delivery and great build quality, very happy with this purchase"
+1022,2026-09-22,Laptop Stand,Accessories,South,5,39.99,199.95,4.0,Battery life is excellent and the delivery was fast
+1023,2026-09-23,Webcam HD 1080p,Video,East,2,59.99,119.98,4.8,"Good value for the price, packaging could be better"
+1024,2026-09-24,Noise-Cancelling Headphones,Audio,West,3,129.99,389.97,4.5,"Customer support helped me with setup, great service overall"
+1025,2026-09-25,Wireless Mouse,Accessories,North,8,25.99,207.92,3.7,"The quality exceeded my expectations, delivery took two days"
+1026,2026-09-26,Mechanical Keyboard,Accessories,South,1,79.50,79.50,4.9,"Works exactly as described, fast shipping and solid packaging"
+1027,2026-09-27,USB-C Hub,Accessories,East,4,45.00,180.00,4.2,Sound quality is amazing and the battery lasts all week
+1028,2026-09-28,Laptop Stand,Accessories,West,6,39.99,239.94,5.0,"Easy to set up, support team replied within an hour"
+1029,2026-09-01,Webcam HD 1080p,Video,North,2,59.99,119.98,4.4,"Great price for this quality, would buy again"
+1030,2026-09-02,Noise-Cancelling Headphones,Audio,South,5,129.99,649.95,4.6,Delivery was delayed but the product quality is excellent
