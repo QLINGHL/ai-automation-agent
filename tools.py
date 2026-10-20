@@ -8,9 +8,11 @@ Every tool is a plain Python function. The same functions are:
 Tools that conceptually need an LLM (summarize / key points / translate)
 accept an optional ``llm`` argument. When no LLM is available they fall back
 to deterministic offline implementations, so the full workflow always runs
-end to end -- with or without an API key.
+end to end -- with or without an API key. The data tools (``analyze_csv``,
+``extract_keywords``) are pure standard library and work fully offline.
 """
 
+import csv
 import re
 from collections import Counter
 from html.parser import HTMLParser
@@ -165,6 +167,141 @@ def extract_key_points(text: str, llm=None) -> list[str]:
         if points:
             return points
     return _extractive_key_points(text)
+
+
+def extract_keywords(text: str, top_n: int = 10, llm=None) -> list[tuple[str, int]]:
+    """Extract the top keywords/phrases of a text as (term, count) pairs.
+
+    Fully offline: unigrams and bigrams (consecutive content words) are
+    counted with stopwords filtered out, then ranked by count with
+    first-occurrence order as the tie-breaker. When an LLM is configured it
+    may refine the selection, but it can only reorder/trim the frequency
+    candidates -- the offline list is always the fallback.
+    """
+    sentences = re.split(r"[.!?\n]+", text.lower())
+    unigrams: Counter = Counter()
+    bigrams: Counter = Counter()
+    first_seen: dict[str, int] = {}
+    position = 0
+
+    def _note(term: str) -> None:
+        nonlocal position
+        if term not in first_seen:
+            first_seen[term] = position
+        position += 1
+
+    for sentence in sentences:
+        tokens = [
+            w
+            for w in re.findall(r"[a-zA-Z']+", sentence)
+            if w not in _STOPWORDS and len(w) > 2
+        ]
+        for token in tokens:
+            unigrams[token] += 1
+            _note(token)
+        for first, second in zip(tokens, tokens[1:]):
+            phrase = f"{first} {second}"
+            bigrams[phrase] += 1
+            _note(phrase)
+
+    counts = dict(unigrams)
+    counts.update(bigrams)
+    ranked = sorted(counts.items(), key=lambda kv: (-kv[1], first_seen[kv[0]]))
+    result = ranked[:top_n]
+
+    if llm is not None and llm.available and result:
+        try:
+            candidates = ", ".join(term for term, _ in ranked[: top_n * 2])
+            raw = llm.complete(
+                "From the candidate keywords below, pick the up to "
+                f"{top_n} most meaningful ones for the text, most important "
+                "first, and return them comma-separated, exactly as written "
+                f"in the candidate list.\n\nCandidates: {candidates}\n\n"
+                f"Text:\n{text[:4000]}",
+                system="You are a precise keyword-extraction assistant.",
+            )
+            picked = [p.strip().lower() for p in raw.split(",")]
+            refined = [(t, c) for t, c in ranked if t in set(picked)]
+            refined.sort(key=lambda kv: picked.index(kv[0]))
+            if len(refined) >= 3:
+                return refined[:top_n]
+        except Exception:
+            pass  # any LLM failure falls back to the frequency ranking
+    return result
+
+
+# --------------------------------------------------------------------------
+# CSV analysis (pure stdlib, works offline)
+# --------------------------------------------------------------------------
+
+
+def _infer_column(values: list[str]) -> tuple[str, list[float] | None]:
+    """Infer a column type from its non-missing values.
+
+    Returns (type, numeric_values) where type is "integer", "number",
+    "string" or "empty"; numeric_values is set for the two numeric types.
+    """
+    if not values:
+        return "empty", None
+    numbers: list[float] = []
+    all_int = True
+    for value in values:
+        try:
+            numbers.append(int(value))
+        except ValueError:
+            all_int = False
+            try:
+                numbers.append(float(value))
+            except ValueError:
+                return "string", None
+    return ("integer" if all_int else "number"), [float(n) for n in numbers]
+
+
+def analyze_csv(path: str, preview_rows: int = 5) -> dict:
+    """Analyze a CSV file: shape, column types, numeric stats, missing
+    values and a preview of the first rows. Pure standard library."""
+    with open(path, newline="", encoding="utf-8-sig") as handle:
+        rows = [row for row in csv.reader(handle) if any(c.strip() for c in row)]
+    if not rows:
+        return {
+            "path": str(path),
+            "row_count": 0,
+            "column_count": 0,
+            "columns": [],
+            "preview": [],
+        }
+
+    header = [name.strip() or f"column_{i + 1}" for i, name in enumerate(rows[0])]
+    data = rows[1:]
+    width = len(header)
+
+    columns = []
+    for idx, name in enumerate(header):
+        raw_values = [(row[idx] if idx < len(row) else "") for row in data]
+        present = [v.strip() for v in raw_values if v.strip()]
+        col_type, numbers = _infer_column(present)
+        column: dict = {
+            "name": name,
+            "type": col_type,
+            "missing": len(raw_values) - len(present),
+        }
+        if numbers:
+            column["min"] = min(numbers)
+            column["max"] = max(numbers)
+            column["mean"] = round(sum(numbers) / len(numbers), 4)
+        columns.append(column)
+
+    preview = [
+        {header[i]: (row[i] if i < len(row) else "") for i in range(width)}
+        for row in data[:preview_rows]
+    ]
+    return {
+        "path": str(path),
+        "row_count": len(data),
+        "column_count": width,
+        "columns": columns,
+        "preview": preview,
+    }
 
 
 def translate_text(text: str, target_language: str = "Chinese", llm=None) -> str:
