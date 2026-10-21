@@ -9,7 +9,8 @@ Tools that conceptually need an LLM (summarize / key points / translate)
 accept an optional ``llm`` argument. When no LLM is available they fall back
 to deterministic offline implementations, so the full workflow always runs
 end to end -- with or without an API key. The data tools (``analyze_csv``,
-``extract_keywords``) are pure standard library and work fully offline.
+``extract_keywords``, ``text_stats``) are pure standard library and work
+fully offline.
 """
 
 import csv
@@ -301,6 +302,39 @@ def analyze_csv(path: str, preview_rows: int = 5) -> dict:
         "column_count": width,
         "columns": columns,
         "preview": preview,
+    }
+
+
+def text_stats(text: str) -> dict:
+    """Compute basic statistics about a text. Pure standard library.
+
+    Returns character/word/sentence/paragraph counts, the average sentence
+    length, the longest sentence (in words) and an estimated reading time
+    at 200 words per minute. Words are runs of word characters, so a run of
+    CJK characters counts as one token -- the counts are meant as a quick
+    profile, not a linguistic analysis.
+    """
+    words = re.findall(r"\w+", text, flags=re.UNICODE)
+    # Own sentence split: _split_sentences drops short sentences on purpose
+    # (it feeds the summarizer), which would skew these counts.
+    flat = re.sub(r"\s+", " ", text).strip()
+    sentences = [s for s in re.split(r"(?<=[.!?])\s+", flat) if s.strip()] if flat else []
+    paragraphs = [p for p in re.split(r"\n\s*\n", text.strip()) if p.strip()]
+    sentence_word_counts = [
+        len(re.findall(r"\w+", s, flags=re.UNICODE)) for s in sentences
+    ]
+    word_count = len(words)
+    return {
+        "char_count": len(text),
+        "char_count_no_spaces": len(re.sub(r"\s", "", text)),
+        "word_count": word_count,
+        "sentence_count": len(sentences),
+        "paragraph_count": len(paragraphs),
+        "avg_words_per_sentence": (
+            round(word_count / len(sentences), 2) if sentences else 0.0
+        ),
+        "longest_sentence_words": max(sentence_word_counts, default=0),
+        "reading_time_minutes": round(word_count / 200, 2),
     }
 
 

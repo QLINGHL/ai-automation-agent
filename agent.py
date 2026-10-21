@@ -76,6 +76,9 @@ def build_registry(llm: LLMClient) -> dict:
         "analyze_csv": lambda path: json.dumps(
             tools.analyze_csv(path), indent=2, ensure_ascii=False
         ),
+        "text_stats": lambda text: json.dumps(
+            tools.text_stats(text), indent=2, ensure_ascii=False
+        ),
     }
 
 
@@ -170,6 +173,20 @@ TOOL_SCHEMAS = [
                 "type": "object",
                 "properties": {"path": {"type": "string"}},
                 "required": ["path"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "text_stats",
+            "description": "Compute statistics about a text: character, "
+            "word, sentence and paragraph counts, average sentence length "
+            "and estimated reading time (works offline).",
+            "parameters": {
+                "type": "object",
+                "properties": {"text": {"type": "string"}},
+                "required": ["text"],
             },
         },
     },

@@ -17,9 +17,10 @@ and keyword analysis of the free-text column.
   schemas and decides itself which tools to call and in what order; tool
   results (and errors) are fed back until the task is done, with a step limit
   for safety.
-- **Tool registry** — eight focused tools, each a plain Python function:
+- **Tool registry** — nine focused tools, each a plain Python function:
   `fetch_url`, `read_file`, `save_to_file`, `summarize_text`,
-  `extract_key_points`, `translate_text`, `extract_keywords`, `analyze_csv`.
+  `extract_key_points`, `translate_text`, `extract_keywords`, `analyze_csv`,
+  `text_stats`.
 - **Data reporting** — `analyze_csv` profiles any CSV with the standard
   library only (shape, inferred column types, min/max/mean, missing-value
   counts, row preview), and `extract_keywords` mines unigram + bigram

@@ -76,6 +76,25 @@ def test_extract_keywords_includes_bigrams():
     assert keywords.get("machine learning", 0) >= 3
 
 
+def test_text_stats_known_text():
+    stats = tools.text_stats("One two three. Four five!\n\nSix seven eight nine ten?")
+    assert stats["word_count"] == 10
+    assert stats["sentence_count"] == 3
+    assert stats["paragraph_count"] == 2
+    assert stats["avg_words_per_sentence"] == 3.33
+    assert stats["longest_sentence_words"] == 5
+    assert stats["char_count_no_spaces"] == stats["char_count"] - 10
+
+
+def test_text_stats_empty_text():
+    stats = tools.text_stats("")
+    assert stats["word_count"] == 0
+    assert stats["sentence_count"] == 0
+    assert stats["paragraph_count"] == 0
+    assert stats["avg_words_per_sentence"] == 0.0
+    assert stats["reading_time_minutes"] == 0.0
+
+
 if __name__ == "__main__":
     tests = [v for k, v in sorted(globals().items()) if k.startswith("test_")]
     for test in tests:
