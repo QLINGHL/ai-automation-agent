@@ -79,6 +79,11 @@ def build_registry(llm: LLMClient) -> dict:
         "text_stats": lambda text: json.dumps(
             tools.text_stats(text), indent=2, ensure_ascii=False
         ),
+        "extract_structured": lambda text, schema: json.dumps(
+            tools.extract_structured(text, schema, llm=llm),
+            indent=2,
+            ensure_ascii=False,
+        ),
     }
 
 
@@ -187,6 +192,29 @@ TOOL_SCHEMAS = [
                 "type": "object",
                 "properties": {"text": {"type": "string"}},
                 "required": ["text"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "extract_structured",
+            "description": "Extract structured fields from a text according "
+            "to a JSON Schema; returns a JSON object with null for fields "
+            "not found. LLM mode when an API key is set, deterministic "
+            "offline regex fallback otherwise.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "text": {"type": "string"},
+                    "schema": {
+                        "type": "object",
+                        "description": "JSON Schema object; top-level "
+                        "'properties' are extracted (with optional 'type', "
+                        "'format', 'enum' or 'pattern' hints).",
+                    },
+                },
+                "required": ["text", "schema"],
             },
         },
     },

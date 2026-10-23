@@ -17,10 +17,10 @@ and keyword analysis of the free-text column.
   schemas and decides itself which tools to call and in what order; tool
   results (and errors) are fed back until the task is done, with a step limit
   for safety.
-- **Tool registry** — nine focused tools, each a plain Python function:
+- **Tool registry** — ten focused tools, each a plain Python function:
   `fetch_url`, `read_file`, `save_to_file`, `summarize_text`,
   `extract_key_points`, `translate_text`, `extract_keywords`, `analyze_csv`,
-  `text_stats`.
+  `text_stats`, `extract_structured`.
 - **Data reporting** — `analyze_csv` profiles any CSV with the standard
   library only (shape, inferred column types, min/max/mean, missing-value
   counts, row preview), and `extract_keywords` mines unigram + bigram
@@ -51,7 +51,7 @@ ai-automation-agent/
 ├── agent.py                  # CLI, agent loop, tool registry + schemas, pipelines
 ├── tools.py                  # tool implementations + offline fallbacks
 ├── llm.py                    # minimal OpenAI-compatible client wrapper
-├── test_tools.py             # tests for analyze_csv / extract_keywords
+├── test_tools.py             # tests for the data & extraction tools
 ├── requirements.txt
 ├── .env.example              # copy to .env and add your key
 ├── samples/

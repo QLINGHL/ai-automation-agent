@@ -95,6 +95,121 @@ def test_text_stats_empty_text():
     assert stats["reading_time_minutes"] == 0.0
 
 
+STRUCTURED_TEXT = (
+    "Hi, I'm Alice Zhang. You can reach me at alice.zhang@example.com "
+    "or visit my portfolio at https://alice.dev. My verdict on the product "
+    "is positive. Price: $1,299.50 for the full report."
+)
+
+STRUCTURED_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "name": {"type": "string"},
+        "email": {"type": "string", "format": "email"},
+        "website": {"type": "string", "format": "uri"},
+        "price": {"type": "number"},
+        "verdict": {"type": "string", "enum": ["positive", "negative", "neutral"]},
+        "company": {"type": "string"},
+    },
+    "required": ["name", "email"],
+}
+
+
+def test_extract_structured_offline_formats_enum_number():
+    result = tools.extract_structured(STRUCTURED_TEXT, STRUCTURED_SCHEMA)
+    assert result["email"] == "alice.zhang@example.com"
+    assert result["website"] == "https://alice.dev"
+    assert result["price"] == 1299.50
+    assert result["verdict"] == "positive"
+    assert result["company"] is None  # not mentioned in the text
+
+
+def test_extract_structured_offline_labeled_strings():
+    result = tools.extract_structured(
+        "Report title: Q3 LLM Benchmarks\nAuthor: Team Delta",
+        {
+            "type": "object",
+            "properties": {
+                "title": {"type": "string"},
+                "author": {"type": "string"},
+            },
+        },
+    )
+    assert result["title"] == "Q3 LLM Benchmarks"
+    assert result["author"] == "Team Delta"
+
+
+def test_extract_structured_offline_pattern_and_integer():
+    schema = {
+        "type": "object",
+        "properties": {
+            "order_id": {"type": "string", "pattern": r"ORD-(\d{6})"},
+            "quantity": {"type": "integer"},
+        },
+    }
+    result = tools.extract_structured(
+        "Your order ORD-482913 shipped. Quantity: 3 units.", schema
+    )
+    assert result["order_id"] == "482913"
+    assert result["quantity"] == 3
+
+
+class _FakeLLM:
+    """Pretends to be llm.LLMClient with a canned completion."""
+
+    available = True
+
+    def __init__(self, reply: str):
+        self._reply = reply
+
+    def complete(self, prompt, system=""):
+        assert "Schema" in prompt  # the schema is actually sent
+        return self._reply
+
+
+class _BrokenLLM:
+    available = True
+
+    def complete(self, prompt, system=""):
+        raise RuntimeError("boom")
+
+
+def test_extract_structured_llm_mode_parses_and_coerces():
+    schema = {
+        "type": "object",
+        "properties": {
+            "city": {"type": "string"},
+            "temp_c": {"type": "number"},
+            "days": {"type": "integer"},
+            "extra_ignored": {"type": "string"},
+        },
+    }
+    reply = (
+        "Here is the extraction:\n```json\n"
+        '{"city": "Berlin", "temp_c": "21.5", "days": 3}\n```'
+    )
+    result = tools.extract_structured(
+        "Berlin is 21.5C today.", schema, llm=_FakeLLM(reply)
+    )
+    assert result == {
+        "city": "Berlin",
+        "temp_c": 21.5,
+        "days": 3,
+        "extra_ignored": None,
+    }
+
+
+def test_extract_structured_llm_failure_falls_back_offline():
+    schema = {
+        "type": "object",
+        "properties": {"email": {"type": "string", "format": "email"}},
+    }
+    result = tools.extract_structured(
+        "contact bob@example.org for details", schema, llm=_BrokenLLM()
+    )
+    assert result["email"] == "bob@example.org"
+
+
 if __name__ == "__main__":
     tests = [v for k, v in sorted(globals().items()) if k.startswith("test_")]
     for test in tests:

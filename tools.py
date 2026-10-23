@@ -14,6 +14,7 @@ fully offline.
 """
 
 import csv
+import json
 import re
 from collections import Counter
 from html.parser import HTMLParser
@@ -354,3 +355,164 @@ def translate_text(text: str, target_language: str = "Chinese", llm=None) -> str
         "performed. Configure OPENAI_API_KEY in .env and re-run without "
         "--demo to get a real translation of the summary."
     )
+
+
+# --------------------------------------------------------------------------
+# Structured extraction (LLM mode + offline regex fallback)
+# --------------------------------------------------------------------------
+
+_FORMAT_PATTERNS = {
+    "email": r"[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}",
+    "uri": r"https?://[^\s<>\"]+",
+    "url": r"https?://[^\s<>\"]+",
+    "date": r"\b\d{4}-\d{2}-\d{2}\b",
+    "date-time": r"\b\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}(?::\d{2})?\b",
+}
+
+_NUMBER_RE = r"-?\d+(?:\.\d+)?"
+
+
+def _find_labeled(text: str, name: str) -> str | None:
+    """Find a ``Name: value`` style labeled field anywhere in the text."""
+    label = name.replace("_", " ")
+    match = re.search(
+        rf"\b{re.escape(label)}\b\s*[:：\-–]\s*([^\n\r;]+)",
+        text,
+        flags=re.IGNORECASE,
+    )
+    if match:
+        return match.group(1).strip()
+    return None
+
+
+def _coerce_to_type(raw, field_type):
+    """Coerce an extracted raw value to the schema property's type."""
+    if raw is None:
+        return None
+    if isinstance(raw, bool):
+        return raw
+    if isinstance(raw, (int, float)):
+        if field_type == "integer":
+            return int(raw)
+        return raw
+    raw = str(raw).strip().rstrip(".,;")
+    if not raw:
+        return None
+    if field_type in ("integer", "number"):
+        match = re.search(_NUMBER_RE, raw.replace(",", ""))
+        if not match:
+            return None
+        try:
+            return int(match.group(0)) if field_type == "integer" else float(
+                match.group(0)
+            )
+        except ValueError:
+            return None
+    if field_type == "boolean":
+        lowered = raw.lower()
+        if lowered in ("true", "yes", "y", "1"):
+            return True
+        if lowered in ("false", "no", "n", "0"):
+            return False
+        return None
+    return raw
+
+
+def _offline_extract(text: str, schema: dict) -> dict:
+    """Best-effort extraction with regexes, no LLM involved.
+
+    Strategy per property (first hit wins):
+
+      1. ``pattern`` in the schema is tried verbatim (capture group 1
+         when the pattern has one);
+      2. a matching ``format`` (email/uri/date/...) searches the whole text;
+      3. an ``enum`` searches for one of its values in the text;
+      4. otherwise a ``Name: value`` labeled lookup is attempted.
+
+    The raw hit is coerced to the property's ``type``; anything not found
+    becomes ``None``.
+    """
+    properties = (schema or {}).get("properties") or {}
+    result: dict = {}
+    for name, prop in properties.items():
+        prop = prop or {}
+        raw = None
+
+        pattern = prop.get("pattern")
+        if pattern:
+            match = re.search(pattern, text)
+            if match:
+                raw = match.group(1) if match.groups() else match.group(0)
+
+        fmt = prop.get("format")
+        if raw is None and fmt in _FORMAT_PATTERNS:
+            match = re.search(_FORMAT_PATTERNS[fmt], text)
+            if match:
+                raw = match.group(0)
+
+        enum = prop.get("enum")
+        if raw is None and isinstance(enum, list) and enum:
+            lowered = text.lower()
+            for choice in enum:
+                if str(choice).lower() in lowered:
+                    raw = choice
+                    break
+
+        if raw is None:
+            raw = _find_labeled(text, name)
+
+        result[name] = _coerce_to_type(raw, prop.get("type"))
+    return result
+
+
+def _extract_first_json(raw: str):
+    """Pull the first complete JSON value out of (possibly chatty) output."""
+    start = raw.find("{")
+    if start == -1:
+        start = raw.find("[")
+    if start == -1:
+        raise ValueError("no JSON found in model output")
+    decoder = json.JSONDecoder()
+    obj, _ = decoder.raw_decode(raw[start:])
+    return obj
+
+
+def _coerce_to_schema(obj: dict, schema: dict) -> dict:
+    """Keep only schema-declared properties and coerce them to their types."""
+    properties = (schema or {}).get("properties") or {}
+    return {
+        name: _coerce_to_type(obj.get(name), (prop or {}).get("type"))
+        for name, prop in properties.items()
+    }
+
+
+def extract_structured(text: str, schema: dict, llm=None) -> dict:
+    """Extract structured fields from text according to a JSON Schema.
+
+    ``schema`` is a JSON-Schema-style object; only its top-level
+    ``properties`` are read (each may carry ``type``, ``format``, ``enum``
+    or ``pattern`` hints).
+
+    With an LLM available, the model does the extraction and its JSON
+    answer is parsed and type-coerced. Without one, a deterministic
+    offline regex extractor runs instead, so agent workflows can call
+    this tool in demo mode too. Anything not found becomes ``None``.
+    """
+    text = text[:MAX_TEXT_CHARS]
+    if llm is not None and llm.available:
+        try:
+            raw = llm.complete(
+                "Extract the requested fields from the text below and return ONLY "
+                "a JSON object matching this JSON Schema. Use null for any field "
+                "you cannot find; do not invent values.\n\n"
+                f"Schema:\n{json.dumps(schema, indent=2, ensure_ascii=False)}\n\n"
+                f"Text:\n{text}",
+                system="You are a precise information-extraction assistant. "
+                "Output only valid JSON, no commentary.",
+            )
+            parsed = _extract_first_json(raw)
+            if isinstance(parsed, dict):
+                return _coerce_to_schema(parsed, schema)
+        except Exception:
+            pass  # any LLM failure falls back to the offline extractor
+    return _offline_extract(text, schema)
