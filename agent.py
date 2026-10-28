@@ -247,18 +247,185 @@ SYSTEM_PROMPT = (
 
 
 # ---------------------------------------------------------------------------
+# Agent run statistics (tool-call counts + token usage)
+# ---------------------------------------------------------------------------
+
+
+def estimate_tokens(text: str) -> int:
+    """Offline token estimate for a piece of text (no API call needed).
+
+    Heuristic, documented so runs stay comparable: each CJK character counts
+    as one token, other characters count as a quarter token (rounded up).
+    Real API usage, when the model response carries it, always wins over
+    this estimate -- see :meth:`AgentRunStats.record_llm_call`.
+    """
+    if not text:
+        return 0
+    import math
+
+    cjk = sum(
+        1
+        for ch in text
+        if "\u4e00" <= ch <= "\u9fff"
+        or "\u3040" <= ch <= "\u30ff"
+        or "\uac00" <= ch <= "\ud7a3"
+    )
+    return cjk + math.ceil((len(text) - cjk) / 4)
+
+
+class AgentRunStats:
+    """Counters for one agent-loop run: tool calls and token usage.
+
+    Pass an instance to :func:`run_llm_agent` and read it back afterwards;
+    the loop fills it in place, so the loop's string return value is
+    unchanged and existing callers keep working.
+    """
+
+    def __init__(self) -> None:
+        self.steps = 0
+        self.llm_calls = 0
+        self.tool_calls: dict[str, int] = {}
+        self.tool_errors: dict[str, int] = {}
+        self.prompt_tokens = 0
+        self.completion_tokens = 0
+        self.api_usage_calls = 0
+
+    @property
+    def total_tool_calls(self) -> int:
+        return sum(self.tool_calls.values())
+
+    @property
+    def total_tool_errors(self) -> int:
+        return sum(self.tool_errors.values())
+
+    @property
+    def total_tokens(self) -> int:
+        return self.prompt_tokens + self.completion_tokens
+
+    @property
+    def token_source(self) -> str:
+        if self.llm_calls == 0:
+            return "none"
+        if self.api_usage_calls == self.llm_calls:
+            return "api"
+        if self.api_usage_calls == 0:
+            return "estimated"
+        return "mixed"
+
+    def record_tool(self, name: str, ok: bool = True) -> None:
+        self.tool_calls[name] = self.tool_calls.get(name, 0) + 1
+        if not ok:
+            self.tool_errors[name] = self.tool_errors.get(name, 0) + 1
+
+    def record_llm_call(self, response, prompt_messages=None) -> None:
+        """Count one LLM round, preferring real usage when present."""
+        self.llm_calls += 1
+        usage = getattr(response, "usage", None)
+        if usage is None and isinstance(response, dict):
+            usage = response.get("usage")
+        prompt = completion = None
+        if usage is not None:
+            if isinstance(usage, dict):
+                prompt = usage.get("prompt_tokens")
+                completion = usage.get("completion_tokens")
+                if prompt is None and completion is None:
+                    total = usage.get("total_tokens")
+                    if total is not None:
+                        prompt, completion = total, 0
+            else:
+                prompt = getattr(usage, "prompt_tokens", None)
+                completion = getattr(usage, "completion_tokens", None)
+                if prompt is None and completion is None:
+                    total = getattr(usage, "total_tokens", None)
+                    if total is not None:
+                        prompt, completion = total, 0
+        if prompt is not None or completion is not None:
+            self.api_usage_calls += 1
+            self.prompt_tokens += int(prompt or 0)
+            self.completion_tokens += int(completion or 0)
+            return
+        # No usage on the response (offline fakes, some providers): estimate
+        # from the prompt messages and the returned message content / calls.
+        prompt_text = json.dumps(
+            prompt_messages or [], ensure_ascii=False, default=str
+        )
+        message = None
+        if not isinstance(response, dict):
+            choices = getattr(response, "choices", None)
+            if choices:
+                message = getattr(choices[0], "message", None)
+        content = getattr(message, "content", None) or ""
+        calls = getattr(message, "tool_calls", None) or []
+        completion_text = content + json.dumps(
+            [
+                {"name": c.function.name, "arguments": c.function.arguments}
+                for c in calls
+            ],
+            ensure_ascii=False,
+            default=str,
+        )
+        self.prompt_tokens += estimate_tokens(prompt_text)
+        self.completion_tokens += estimate_tokens(completion_text)
+
+    def summary(self) -> dict:
+        return {
+            "steps": self.steps,
+            "llm_calls": self.llm_calls,
+            "total_tool_calls": self.total_tool_calls,
+            "tool_calls_by_tool": dict(self.tool_calls),
+            "total_tool_errors": self.total_tool_errors,
+            "tool_errors_by_tool": dict(self.tool_errors),
+            "prompt_tokens": self.prompt_tokens,
+            "completion_tokens": self.completion_tokens,
+            "total_tokens": self.total_tokens,
+            "token_source": self.token_source,
+        }
+
+
+def format_run_stats(stats: AgentRunStats) -> str:
+    """Render a run's statistics as a short Markdown section."""
+    lines = [
+        "## Run Statistics",
+        "",
+        f"- Steps: {stats.steps}",
+        f"- LLM calls: {stats.llm_calls}",
+        f"- Tool calls: {stats.total_tool_calls}",
+    ]
+    for name in sorted(stats.tool_calls):
+        lines.append(f"  - {name}: {stats.tool_calls[name]}")
+    lines.append(f"- Tool errors: {stats.total_tool_errors}")
+    for name in sorted(stats.tool_errors):
+        lines.append(f"  - {name}: {stats.tool_errors[name]} errors")
+    lines.append(
+        f"- Tokens: {stats.prompt_tokens} prompt + "
+        f"{stats.completion_tokens} completion = {stats.total_tokens} "
+        f"({stats.token_source})"
+    )
+    return "\n".join(lines)
+
+
+# ---------------------------------------------------------------------------
 # LLM agent loop
 # ---------------------------------------------------------------------------
 
 
-def run_llm_agent(task: str, llm: LLMClient, max_steps: int = 12) -> str:
+def run_llm_agent(
+    task: str,
+    llm: LLMClient,
+    max_steps: int = 12,
+    stats: AgentRunStats | None = None,
+) -> str:
+    if stats is None:
+        stats = AgentRunStats()
     registry = build_registry(llm)
     messages = [
         {"role": "system", "content": SYSTEM_PROMPT},
         {"role": "user", "content": task},
     ]
     for step in range(1, max_steps + 1):
+        stats.steps = step
         response = llm.chat(messages, TOOL_SCHEMAS)
+        stats.record_llm_call(response, prompt_messages=messages)
         message = response.choices[0].message
         messages.append(message.model_dump(exclude_none=True))
 
@@ -271,8 +438,10 @@ def run_llm_agent(task: str, llm: LLMClient, max_steps: int = 12) -> str:
                 args = json.loads(call.function.arguments or "{}")
                 print(f"  [step {step}] tool: {name}({', '.join(args)})")
                 result = registry[name](**args)
+                stats.record_tool(name, ok=True)
             except Exception as exc:  # feed errors back so the model can recover
                 result = f"ERROR in {name}: {exc}"
+                stats.record_tool(name, ok=False)
             messages.append(
                 {
                     "role": "tool",
@@ -521,7 +690,10 @@ def main(argv: list[str] | None = None) -> int:
                 )
                 return 2
             print(f"Running LLM agent loop (model: {llm.model}) ...")
-            print(run_llm_agent(args.task, llm))
+            stats = AgentRunStats()
+            print(run_llm_agent(args.task, llm, stats=stats))
+            print()
+            print(format_run_stats(stats))
             return 0
 
         if not llm.available and not args.demo and (args.url or args.file or args.csv):

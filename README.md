@@ -17,6 +17,12 @@ and keyword analysis of the free-text column.
   schemas and decides itself which tools to call and in what order; tool
   results (and errors) are fed back until the task is done, with a step limit
   for safety.
+- **Run statistics** — every `--task` run prints a statistics section:
+  steps, LLM calls, tool-call counts per tool, tool errors, and token usage.
+  Real `usage` from the API is used when present; otherwise tokens are
+  estimated offline (one token per CJK character, one per four other
+  characters). The same counters are available in code via
+  `AgentRunStats`, passed to `run_llm_agent(..., stats=stats)`.
 - **Tool registry** — ten focused tools, each a plain Python function:
   `fetch_url`, `read_file`, `save_to_file`, `summarize_text`,
   `extract_key_points`, `translate_text`, `extract_keywords`, `analyze_csv`,
@@ -119,6 +125,7 @@ Run the tool tests with:
 
 ```bash
 python test_tools.py        # or: pytest test_tools.py
+python test_agent.py        # or: pytest test_agent.py (agent-loop stats)
 ```
 
 ### 5. Free-form agent loop (requires an API key)
