@@ -306,6 +306,83 @@ def analyze_csv(path: str, preview_rows: int = 5) -> dict:
     }
 
 
+def _md_escape(value) -> str:
+    """Escape a cell value so it cannot break a Markdown table row."""
+    return str(value).replace("|", "\\|").replace("\r", " ").replace("\n", " ").strip()
+
+
+def _fmt_number(value: float) -> str:
+    """Render a stat without a trailing .0 for integral values."""
+    return str(int(value)) if float(value).is_integer() else str(value)
+
+
+def csv_to_markdown(path: str, preview_rows: int = 10) -> str:
+    """Render a CSV file as a Markdown report, for report generation.
+
+    Reuses :func:`analyze_csv` (shape, column types, numeric stats,
+    missing-value counts, preview) and returns a Markdown document with
+    a dataset overview table and a preview table. Cell values are escaped
+    so embedded ``|`` characters cannot break the tables. A file with no
+    rows still yields a short report instead of an error, so the agent
+    can pass the result on to the model or to ``save_to_file`` unchanged;
+    a missing file raises ``FileNotFoundError`` from the underlying open.
+    """
+    if preview_rows < 0:
+        raise ValueError("preview_rows must be >= 0")
+    analysis = analyze_csv(path, preview_rows=preview_rows)
+    lines = [
+        "# CSV Report",
+        "",
+        f"- **Source:** `{path}`",
+        f"- **Rows:** {analysis['row_count']}",
+        f"- **Columns:** {analysis['column_count']}",
+        "",
+    ]
+    if not analysis["columns"]:
+        lines.append("No data found in this CSV file.")
+        lines.append("")
+        return "\n".join(lines)
+
+    lines += [
+        "## Dataset Overview",
+        "",
+        "| Column | Type | Missing | Min | Max | Mean |",
+        "| --- | --- | ---: | ---: | ---: | ---: |",
+    ]
+    for column in analysis["columns"]:
+        stats = [
+            _fmt_number(column[key]) if key in column else "—"
+            for key in ("min", "max", "mean")
+        ]
+        lines.append(
+            f"| {_md_escape(column['name'])} | {column['type']} | "
+            f"{column['missing']} | {stats[0]} | {stats[1]} | {stats[2]} |"
+        )
+
+    preview = analysis["preview"]
+    if preview_rows > 0 and preview:
+        names = [c["name"] for c in analysis["columns"]]
+        lines += [
+            "",
+            f"## Preview (first {len(preview)} rows)",
+            "",
+            "| " + " | ".join(_md_escape(n) for n in names) + " |",
+            "| " + " | ".join("---" for _ in names) + " |",
+        ]
+        for row in preview:
+            lines.append(
+                "| " + " | ".join(_md_escape(row.get(n, "")) for n in names) + " |"
+            )
+        if analysis["row_count"] > len(preview):
+            lines += [
+                "",
+                f"Showing the first {len(preview)} of "
+                f"{analysis['row_count']} rows.",
+            ]
+    lines.append("")
+    return "\n".join(lines)
+
+
 def text_stats(text: str) -> dict:
     """Compute basic statistics about a text. Pure standard library.
 

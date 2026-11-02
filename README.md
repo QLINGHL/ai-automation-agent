@@ -23,15 +23,19 @@ and keyword analysis of the free-text column.
   estimated offline (one token per CJK character, one per four other
   characters). The same counters are available in code via
   `AgentRunStats`, passed to `run_llm_agent(..., stats=stats)`.
-- **Tool registry** — ten focused tools, each a plain Python function:
+- **Tool registry** — eleven focused tools, each a plain Python function:
   `fetch_url`, `read_file`, `save_to_file`, `summarize_text`,
   `extract_key_points`, `translate_text`, `extract_keywords`, `analyze_csv`,
-  `text_stats`, `extract_structured`.
+  `csv_to_markdown`, `text_stats`, `extract_structured`.
 - **Data reporting** — `analyze_csv` profiles any CSV with the standard
   library only (shape, inferred column types, min/max/mean, missing-value
   counts, row preview), and `extract_keywords` mines unigram + bigram
   keywords with stopword filtering. Both run fully offline; the `--csv`
-  workflow combines them into a Markdown data report.
+  workflow combines them into a Markdown data report. The new
+  `csv_to_markdown` tool renders the same profile as a standalone
+  Markdown document (overview table + preview table, `|`-escaped), so
+  the LLM agent loop can drop a CSV table straight into a report with
+  `save_to_file` instead of re-formatting the JSON profile itself.
 - **Offline demo mode** — no API key? The same tools run in a deterministic
   pipeline: summarization and key-point extraction fall back to a
   frequency-based extractive algorithm, and translation returns a clearly
@@ -228,7 +232,9 @@ Column revenue ranges from 45 to 779.94 with a mean of 262.6683. ...
 
 Add a tool in three steps: write the function in `tools.py`, register it in
 `build_registry()`, and add its JSON schema to `TOOL_SCHEMAS` in `agent.py`.
-The agent loop and the CLI pick it up automatically.
+The agent loop and the CLI pick it up automatically. `csv_to_markdown`
+is the latest example: it reuses `analyze_csv` and only adds Markdown
+rendering, so it needed no new parsing logic.
 
 ## License
 

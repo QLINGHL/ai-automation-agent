@@ -76,6 +76,9 @@ def build_registry(llm: LLMClient) -> dict:
         "analyze_csv": lambda path: json.dumps(
             tools.analyze_csv(path), indent=2, ensure_ascii=False
         ),
+        "csv_to_markdown": lambda path, preview_rows=10: tools.csv_to_markdown(
+            path, preview_rows
+        ),
         "text_stats": lambda text: json.dumps(
             tools.text_stats(text), indent=2, ensure_ascii=False
         ),
@@ -177,6 +180,24 @@ TOOL_SCHEMAS = [
             "parameters": {
                 "type": "object",
                 "properties": {"path": {"type": "string"}},
+                "required": ["path"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "csv_to_markdown",
+            "description": "Render a CSV file as a Markdown report: dataset "
+            "overview table (column types, missing values, numeric stats) "
+            "plus a preview table, ready to paste into a report or save "
+            "with save_to_file (works offline).",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "path": {"type": "string"},
+                    "preview_rows": {"type": "integer", "default": 10},
+                },
                 "required": ["path"],
             },
         },

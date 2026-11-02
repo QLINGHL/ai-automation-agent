@@ -5,6 +5,7 @@ Runs two ways:
     pytest test_tools.py      # the same functions are pytest tests
 """
 
+import tempfile
 from pathlib import Path
 
 import tools
@@ -113,6 +114,56 @@ STRUCTURED_SCHEMA = {
     },
     "required": ["name", "email"],
 }
+
+
+def test_csv_to_markdown_sample_overview_and_preview():
+    markdown = tools.csv_to_markdown(str(SAMPLE_CSV), preview_rows=5)
+    assert markdown.startswith("# CSV Report")
+    assert "- **Rows:** 30" in markdown
+    assert "- **Columns:** 10" in markdown
+    assert "| Column | Type | Missing | Min | Max | Mean |" in markdown
+    # units are 1..12, mean 4.4; revenue mean is a non-integral float
+    assert "| units | integer | 0 | 1 | 12 | 4.4 |" in markdown
+    assert "| customer_rating | number | 3 |" in markdown
+    assert "## Preview (first 5 rows)" in markdown
+    assert "| 1001 |" in markdown
+    assert "Wireless Mouse" in markdown
+    assert "Showing the first 5 of 30 rows." in markdown
+
+
+def test_csv_to_markdown_preview_rows_limit_and_zero():
+    two = tools.csv_to_markdown(str(SAMPLE_CSV), preview_rows=2)
+    assert "## Preview (first 2 rows)" in two
+    assert "| 1002 |" in two
+    assert "| 1003 |" not in two
+    none = tools.csv_to_markdown(str(SAMPLE_CSV), preview_rows=0)
+    assert "## Preview" not in none
+    assert "- **Rows:** 30" in none
+
+
+def test_csv_to_markdown_escapes_pipes_and_handles_empty():
+    with tempfile.TemporaryDirectory() as tmp:
+        pipe_csv = Path(tmp) / "pipes.csv"
+        pipe_csv.write_text(
+            'id,note\n1,"a | b"\n2,plain\n', encoding="utf-8"
+        )
+        markdown = tools.csv_to_markdown(str(pipe_csv))
+        assert "a \\| b" in markdown
+        assert "| id | integer | 0 | 1 | 2 | 1.5 |" in markdown
+        empty_csv = Path(tmp) / "empty.csv"
+        empty_csv.write_text("", encoding="utf-8")
+        empty = tools.csv_to_markdown(str(empty_csv))
+        assert "- **Rows:** 0" in empty
+        assert "No data found in this CSV file." in empty
+
+
+def test_csv_to_markdown_rejects_negative_preview_rows():
+    try:
+        tools.csv_to_markdown(str(SAMPLE_CSV), preview_rows=-1)
+    except ValueError:
+        pass
+    else:
+        raise AssertionError("expected ValueError for preview_rows=-1")
 
 
 def test_extract_structured_offline_formats_enum_number():

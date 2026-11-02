@@ -10,6 +10,7 @@ model_dump(), tool_calls, and an optional usage payload).
 """
 
 import json
+from pathlib import Path
 
 import agent
 
@@ -195,6 +196,18 @@ def test_run_llm_agent_prefers_real_api_usage():
     assert stats.completion_tokens == 20
     assert stats.total_tokens == 120
     assert stats.token_source == "api"
+
+
+def test_registry_csv_to_markdown_and_schema():
+    sample = Path(__file__).parent / "samples" / "sample_sales.csv"
+    registry = agent.build_registry(None)
+    markdown = registry["csv_to_markdown"](str(sample), preview_rows=2)
+    assert markdown.startswith("# CSV Report")
+    assert "## Preview (first 2 rows)" in markdown
+    assert "| 1003 |" not in markdown
+    names = [s["function"]["name"] for s in agent.TOOL_SCHEMAS]
+    assert "csv_to_markdown" in names
+    assert len(names) == 11
 
 
 if __name__ == "__main__":
