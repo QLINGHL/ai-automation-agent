@@ -95,7 +95,7 @@ TOOL_SCHEMAS = [
         "type": "function",
         "function": {
             "name": "fetch_url",
-            "description": "Download a web page and return its readable plain text.",
+            "description": "Download a web page and return its readable plain text. Results are cached in-process for 5 minutes, so re-fetching the same URL in one run is instant.",
             "parameters": {
                 "type": "object",
                 "properties": {"url": {"type": "string"}},

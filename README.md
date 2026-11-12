@@ -45,6 +45,11 @@ and keyword analysis of the free-text column.
   servers (LM Studio, Ollama, vLLM, ...) via `OPENAI_BASE_URL`.
 - **Zero-config HTML reading** — web pages are converted to readable text with
   a small built-in extractor (standard library only), no heavy dependencies.
+  Fetches are cached in-process (5-minute TTL, 128 entries, `use_cache=False`
+  to force a fresh download), so the agent loop re-reading the same source
+  doesn't re-download it; failed fetches are never cached. Cache state is
+  visible via `tools.fetch_cache_info()` and reset with
+  `tools.clear_fetch_cache()`.
 
 ## Tech Stack
 

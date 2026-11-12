@@ -16,6 +16,7 @@ fully offline.
 import csv
 import json
 import re
+import time
 from collections import Counter
 from html.parser import HTMLParser
 from pathlib import Path
@@ -23,6 +24,19 @@ from pathlib import Path
 import requests
 
 MAX_TEXT_CHARS = 12_000  # cap text sent to the LLM / kept in reports
+
+# In-process cache for fetch_url: repeated reads of the same URL inside one
+# run (the agent loop often re-fetches a source) reuse the downloaded text
+# instead of hitting the network again. Entries expire after
+# FETCH_CACHE_TTL_SECONDS and the cache holds at most
+# FETCH_CACHE_MAX_ENTRIES entries (oldest evicted first). Only successful
+# fetches are cached; HTTP errors are never stored.
+FETCH_CACHE_TTL_SECONDS = 300
+FETCH_CACHE_MAX_ENTRIES = 128
+
+_fetch_cache: dict[str, tuple[float, str]] = {}  # url -> (stored_at, text)
+_fetch_cache_hits = 0
+_fetch_cache_misses = 0
 
 # --------------------------------------------------------------------------
 # Web fetching
@@ -54,8 +68,32 @@ class _TextExtractor(HTMLParser):
                 self.parts.append(text)
 
 
-def fetch_url(url: str, timeout: int = 15) -> str:
-    """Download a web page and return its readable plain text."""
+def fetch_url(
+    url: str,
+    timeout: int = 15,
+    use_cache: bool = True,
+    cache_ttl: float = FETCH_CACHE_TTL_SECONDS,
+) -> str:
+    """Download a web page and return its readable plain text.
+
+    With ``use_cache`` (the default) the extracted text is kept in a
+    process-local cache keyed by URL for ``cache_ttl`` seconds, so a
+    second fetch of the same URL in the same run returns instantly
+    without another HTTP request. Pass ``use_cache=False`` to always
+    re-download (e.g. when the page is expected to change), and
+    ``cache_ttl=0`` to expire entries immediately. Failed requests are
+    never cached.
+    """
+    global _fetch_cache_hits, _fetch_cache_misses
+    if use_cache:
+        entry = _fetch_cache.get(url)
+        if entry is not None:
+            stored_at, text = entry
+            if time.monotonic() - stored_at < cache_ttl:
+                _fetch_cache_hits += 1
+                return text
+            del _fetch_cache[url]  # expired: drop it and fetch fresh
+        _fetch_cache_misses += 1
     resp = requests.get(
         url,
         timeout=timeout,
@@ -65,7 +103,31 @@ def fetch_url(url: str, timeout: int = 15) -> str:
     parser = _TextExtractor()
     parser.feed(resp.text)
     text = "\n".join(parser.parts)
-    return re.sub(r"\n{3,}", "\n\n", text).strip()
+    text = re.sub(r"\n{3,}", "\n\n", text).strip()
+    if use_cache:
+        _fetch_cache[url] = (time.monotonic(), text)
+        while len(_fetch_cache) > FETCH_CACHE_MAX_ENTRIES:
+            _fetch_cache.pop(next(iter(_fetch_cache)))  # evict oldest
+    return text
+
+
+def clear_fetch_cache() -> None:
+    """Drop all cached pages and reset the hit/miss counters."""
+    global _fetch_cache_hits, _fetch_cache_misses
+    _fetch_cache.clear()
+    _fetch_cache_hits = 0
+    _fetch_cache_misses = 0
+
+
+def fetch_cache_info() -> dict:
+    """Report the fetch cache state: entries, hits, misses, limits."""
+    return {
+        "entries": len(_fetch_cache),
+        "hits": _fetch_cache_hits,
+        "misses": _fetch_cache_misses,
+        "max_entries": FETCH_CACHE_MAX_ENTRIES,
+        "default_ttl_seconds": FETCH_CACHE_TTL_SECONDS,
+    }
 
 
 # --------------------------------------------------------------------------

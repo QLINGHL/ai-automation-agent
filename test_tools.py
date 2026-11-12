@@ -6,7 +6,11 @@ Runs two ways:
 """
 
 import tempfile
+import time
 from pathlib import Path
+from unittest import mock
+
+import requests
 
 import tools
 
@@ -259,6 +263,151 @@ def test_extract_structured_llm_failure_falls_back_offline():
         "contact bob@example.org for details", schema, llm=_BrokenLLM()
     )
     assert result["email"] == "bob@example.org"
+
+
+# --------------------------------------------------------------------------
+# fetch_url cache
+# --------------------------------------------------------------------------
+
+
+class _FakeResponse:
+    """Minimal stand-in for requests.Response (text + raise_for_status)."""
+
+    def __init__(self, text: str, status_code: int = 200):
+        self.text = text
+        self.status_code = status_code
+
+    def raise_for_status(self):
+        if self.status_code >= 400:
+            raise requests.HTTPError(f"{self.status_code} Client Error")
+
+
+def _fake_get_factory(pages: dict) -> mock.Mock:
+    """Return a mock requests.get serving ``pages`` by URL."""
+
+    def _get(url, **kwargs):
+        if url not in pages:
+            raise requests.HTTPError(f"404 Client Error for url: {url}")
+        return _FakeResponse(pages[url])
+
+    return mock.Mock(side_effect=_get)
+
+
+def test_fetch_url_extracts_text_and_caches_repeat_calls():
+    tools.clear_fetch_cache()
+    get = _fake_get_factory(
+        {"https://example.com/a": "<html><body><h1>Hello</h1><script>var x=1;</script><p>World</p></body></html>"}
+    )
+    with mock.patch.object(tools.requests, "get", get):
+        first = tools.fetch_url("https://example.com/a")
+        second = tools.fetch_url("https://example.com/a")
+    assert first == "Hello\nWorld"
+    assert second == first
+    assert get.call_count == 1, "second fetch of the same URL must not hit the network"
+    info = tools.fetch_cache_info()
+    assert info == {
+        "entries": 1,
+        "hits": 1,
+        "misses": 1,
+        "max_entries": tools.FETCH_CACHE_MAX_ENTRIES,
+        "default_ttl_seconds": tools.FETCH_CACHE_TTL_SECONDS,
+    }
+
+
+def test_fetch_url_different_urls_fetch_separately():
+    tools.clear_fetch_cache()
+    get = _fake_get_factory(
+        {"https://example.com/a": "<p>Page A</p>", "https://example.com/b": "<p>Page B</p>"}
+    )
+    with mock.patch.object(tools.requests, "get", get):
+        assert tools.fetch_url("https://example.com/a") == "Page A"
+        assert tools.fetch_url("https://example.com/b") == "Page B"
+        assert tools.fetch_url("https://example.com/a") == "Page A"
+    assert get.call_count == 2
+
+
+def test_fetch_url_cache_expires_after_ttl():
+    tools.clear_fetch_cache()
+    get = _fake_get_factory({"https://example.com/a": "<p>Fresh</p>"})
+    with mock.patch.object(tools.requests, "get", get):
+        assert tools.fetch_url("https://example.com/a", cache_ttl=0.1) == "Fresh"
+        assert tools.fetch_url("https://example.com/a", cache_ttl=0.1) == "Fresh"
+        assert get.call_count == 1
+        time.sleep(0.15)
+        assert tools.fetch_url("https://example.com/a", cache_ttl=0.1) == "Fresh"
+    assert get.call_count == 2, "expired entry must be re-fetched"
+
+
+def test_fetch_url_zero_ttl_never_serves_from_cache():
+    tools.clear_fetch_cache()
+    get = _fake_get_factory({"https://example.com/a": "<p>Fresh</p>"})
+    with mock.patch.object(tools.requests, "get", get):
+        tools.fetch_url("https://example.com/a", cache_ttl=0)
+        tools.fetch_url("https://example.com/a", cache_ttl=0)
+    assert get.call_count == 2
+
+
+def test_fetch_url_use_cache_false_always_fetches():
+    tools.clear_fetch_cache()
+    get = _fake_get_factory({"https://example.com/a": "<p>Fresh</p>"})
+    with mock.patch.object(tools.requests, "get", get):
+        tools.fetch_url("https://example.com/a", use_cache=False)
+        tools.fetch_url("https://example.com/a", use_cache=False)
+    assert get.call_count == 2
+    assert tools.fetch_cache_info()["entries"] == 0
+
+
+def test_fetch_url_errors_are_not_cached():
+    tools.clear_fetch_cache()
+    get = mock.Mock(
+        side_effect=requests.HTTPError("500 Server Error")
+    )
+    with mock.patch.object(tools.requests, "get", get):
+        for _ in range(2):
+            try:
+                tools.fetch_url("https://example.com/broken")
+            except requests.HTTPError:
+                pass
+            else:
+                raise AssertionError("HTTP error must propagate")
+    assert get.call_count == 2, "failed fetches must be retried, not served from cache"
+    assert tools.fetch_cache_info()["entries"] == 0
+
+
+def test_fetch_url_cache_evicts_oldest_when_full():
+    tools.clear_fetch_cache()
+    get = _fake_get_factory(
+        {
+            "https://example.com/1": "<p>One</p>",
+            "https://example.com/2": "<p>Two</p>",
+            "https://example.com/3": "<p>Three</p>",
+        }
+    )
+    with mock.patch.object(tools, "FETCH_CACHE_MAX_ENTRIES", 2):
+        with mock.patch.object(tools.requests, "get", get):
+            tools.fetch_url("https://example.com/1")
+            tools.fetch_url("https://example.com/2")
+            tools.fetch_url("https://example.com/3")
+            assert tools.fetch_cache_info()["entries"] == 2
+            tools.fetch_url("https://example.com/1")
+    assert get.call_count == 4, "evicted oldest entry must be re-fetched"
+
+
+def test_clear_fetch_cache_resets_entries_and_counters():
+    tools.clear_fetch_cache()
+    get = _fake_get_factory({"https://example.com/a": "<p>Fresh</p>"})
+    with mock.patch.object(tools.requests, "get", get):
+        tools.fetch_url("https://example.com/a")
+        tools.fetch_url("https://example.com/a")
+    assert tools.fetch_cache_info()["hits"] == 1
+    tools.clear_fetch_cache()
+    assert tools.fetch_cache_info() == {
+        "entries": 0,
+        "hits": 0,
+        "misses": 0,
+        "max_entries": tools.FETCH_CACHE_MAX_ENTRIES,
+        "default_ttl_seconds": tools.FETCH_CACHE_TTL_SECONDS,
+    }
 
 
 if __name__ == "__main__":
